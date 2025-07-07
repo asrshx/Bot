@@ -33,10 +33,7 @@ function loadData() {
     groupRules = JSON.parse(fs.readFileSync('groupRules.json', 'utf8'));
     botConfig = JSON.parse(fs.readFileSync('botConfig.json', 'utf8'));
   } catch {
-    // ignore missing or corrupt files
-  }
-}
-
+    
 // Save persistent data
 function saveData() {
   fs.writeFileSync('groupLocks.json', JSON.stringify(lockedGroups, null, 2));
