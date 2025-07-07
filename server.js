@@ -44,7 +44,6 @@ function saveData() {
   fs.writeFileSync('bannedUsers.json', JSON.stringify(bannedUsers, null, 2));
   fs.writeFileSync('groupRules.json', JSON.stringify(groupRules, null, 2));
   fs.writeFileSync('botConfig.json', JSON.stringify(botConfig, null, 2));
-}
 
 // Main dashboard
 app.get('/', checkAuth, (req, res) => {
