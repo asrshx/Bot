@@ -46,6 +46,7 @@ function saveData() {
   fs.writeFileSync('botConfig.json', JSON.stringify(botConfig, null, 2));
 
 // Main dashboard
+function saveData() {
 app.get('/', checkAuth, (req, res) => {
   const lockDisplay = Object.entries(lockedGroups).map(([id, name]) => `<b>Group ${id}:</b> ${name}`).join('<br>') || 'None';
   const nickDisplay = Object.entries(lockedNicknames).map(([id, name]) => `<b>Thread ${id}:</b> ${name}`).join('<br>') || 'None';
