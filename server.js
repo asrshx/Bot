@@ -45,43 +45,6 @@ function saveData() {
   fs.writeFileSync('groupRules.json', JSON.stringify(groupRules, null, 2));
   fs.writeFileSync('botConfig.json', JSON.stringify(botConfig, null, 2));
 }
-
-// Authentication middleware
-function checkAuth(req, res, next) {
-  if (req.session.authenticated) return next();
-  res.redirect('/login');
-}
-
-// Login page
-app.get('/login', (req, res) => {
-  res.send(`
-  <html><head><title>Bot - HENRY-X</title>
-  <style>
-  body{display:flex;justify-content:center;align-items:center;height:100vh;background:#121212;color:#0ff;font-family:sans-serif;}
-  .login-box{background:#000a;padding:40px 60px;border-radius:12px;box-shadow:0 0 15px #0ff;}
-  input[type=password]{width:100%;padding:12px;border-radius:8px;border:none;background:#111;color:#0ff;margin-bottom:20px;}
-  button{width:100%;padding:12px;border:none;border-radius:8px;background:#f06;color:#fff;font-size:18px;cursor:pointer;}
-  button:hover{background:#f39;}
-  </style>
-  </head><body>
-  <form class="login-box" method="POST" action="/login">
-    <h2 style="text-align:center;color:#f06;margin-bottom:30px;">HENRY-X UNIQUE KEY</h2>
-    <input type="unique key" name="key" placeholder="Enter Unique key" required />
-    <button type="submit">Start</button>
-  </form>
-  </body></html>
-  `);
-});
-
-// Login POST
-app.post('/login', (req, res) => {
-  const pass = req.body.pass;
-  if (pass === 'HENRY-X 2.0') {  // Change password here
-    req.session.authenticated = true;
-    res.redirect('/');
-  } else {
-    res.send(`<p style="color:red;text-align:center;margin-top:50px;">❌ Wrong password!<br><a href="/login">Try again</a></p>`);
-  }
 });
 
 // Main dashboard
