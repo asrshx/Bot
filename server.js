@@ -33,7 +33,10 @@ function loadData() {
     groupRules = JSON.parse(fs.readFileSync('groupRules.json', 'utf8'));
     botConfig = JSON.parse(fs.readFileSync('botConfig.json', 'utf8'));
   } catch {
-    
+    // ignore missing or corrupt files
+  }
+}
+
 // Save persistent data
 function saveData() {
   fs.writeFileSync('groupLocks.json', JSON.stringify(lockedGroups, null, 2));
@@ -41,9 +44,47 @@ function saveData() {
   fs.writeFileSync('bannedUsers.json', JSON.stringify(bannedUsers, null, 2));
   fs.writeFileSync('groupRules.json', JSON.stringify(groupRules, null, 2));
   fs.writeFileSync('botConfig.json', JSON.stringify(botConfig, null, 2));
+}
+
+// Authentication middleware
+function checkAuth(req, res, next) {
+  if (req.session.authenticated) return next();
+  res.redirect('/login');
+}
+
+// Login page
+app.get('/login', (req, res) => {
+  res.send(`
+  <html><head><title>Login - DARKSTAR TOOL</title>
+  <style>
+  body{display:flex;justify-content:center;align-items:center;height:100vh;background:#121212;color:#0ff;font-family:sans-serif;}
+  .login-box{background:#000a;padding:40px 60px;border-radius:12px;box-shadow:0 0 15px #0ff;}
+  input[type=password]{width:100%;padding:12px;border-radius:8px;border:none;background:#111;color:#0ff;margin-bottom:20px;}
+  button{width:100%;padding:12px;border:none;border-radius:8px;background:#f06;color:#fff;font-size:18px;cursor:pointer;}
+  button:hover{background:#f39;}
+  </style>
+  </head><body>
+  <form class="login-box" method="POST" action="/login">
+    <h2 style="text-align:center;color:#f06;margin-bottom:30px;">DARKSTAR LOGIN</h2>
+    <input type="password" name="pass" placeholder="Enter Password" required />
+    <button type="submit">Login</button>
+  </form>
+  </body></html>
+  `);
+});
+
+// Login POST
+app.post('/login', (req, res) => {
+  const pass = req.body.pass;
+  if (pass === 'admin123') {  // Change password here
+    req.session.authenticated = true;
+    res.redirect('/');
+  } else {
+    res.send(`<p style="color:red;text-align:center;margin-top:50px;">❌ Wrong password!<br><a href="/login">Try again</a></p>`);
+  }
+});
 
 // Main dashboard
-function saveData() {
 app.get('/', checkAuth, (req, res) => {
   const lockDisplay = Object.entries(lockedGroups).map(([id, name]) => `<b>Group ${id}:</b> ${name}`).join('<br>') || 'None';
   const nickDisplay = Object.entries(lockedNicknames).map(([id, name]) => `<b>Thread ${id}:</b> ${name}`).join('<br>') || 'None';
@@ -52,7 +93,7 @@ app.get('/', checkAuth, (req, res) => {
   const uptime = Math.floor((Date.now() - startTime) / 1000);
 
   res.send(`
-  <html><head><title>HENRY-X BOT PANEL</title>
+  <html><head><title>DARKSTAR TOOL PANEL</title>
   <style>
     body {background:#000;color:#0ff;font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;padding:20px;max-width:700px;margin:auto;}
     h1 {color:#f06;text-align:center;text-shadow:0 0 10px #f06;}
@@ -79,7 +120,7 @@ app.get('/', checkAuth, (req, res) => {
     a.stop-btn:hover {background:#ff0000;}
   </style>
   </head><body>
-    <h1>🔥 HENRY-X PANEL 🔥</h1>
+    <h1>🔥 DARKSTAR TOOL PANEL 🔥</h1>
     <form method="POST" action="/configure">
       <div class="box">
         <label><b>Admin Facebook ID:</b></label><br>
@@ -93,7 +134,7 @@ app.get('/', checkAuth, (req, res) => {
         <label><b>Appstate JSON Array:</b></label><br>
         <textarea name="appstate" rows="10" placeholder="Paste your appstate JSON array here..." required></textarea>
       </div>
-      <button type="submit"> Submit / Restart Bot</button>
+      <button type="submit">🚀 Start / Restart Bot</button>
     </form>
 
     <div class="box">
@@ -106,7 +147,7 @@ app.get('/', checkAuth, (req, res) => {
       <br><br>
       <a href="/stop" class="stop-btn">🛑 Stop Bot</a>
     </div>
-    <footer>😈 Made by Henry Dwn</footer>
+    <footer>👨‍💻 Code by Alex Khan</footer>
   </body></html>`);
 });
 
@@ -223,19 +264,19 @@ ${botConfig.prefix}showrules`,
               );
               break;
             case 'nicknamelock':
-              if (!isAdmin) return api.sendMessage('🤔 Me Kyu Sunu Tumhari Bat Me Sirf Apne Owner Ki Bat Sunuga.', threadID);
+              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
               if (args[1] === 'on') {
                 const nickName = args.slice(2).join(' ');
                 if (!nickName) return api.sendMessage('⚠️ Usage: nicknamelock on <nickname>', threadID);
                 lockedNicknames[threadID] = nickName;
                 saveData();
                 lockAllNicknames(api, threadID, nickName);
-                api.sendMessage(`✅ Nickname lock enabled Me Nickname Lock Kr Rha Or Mere Owner Ke Hater Ki Maka Bhosda bye: "${nickName}"`, threadID);
+                api.sendMessage(`✅ Nickname lock enabled: "${nickName}"`, threadID);
               } else if (args[1] === 'off') {
                 if (lockedNicknames[threadID]) {
                   delete lockedNicknames[threadID];
                   saveData();
-                  api.sendMessage('✅ Nickname lock disabled Shukar Manao Mere Owner Ne Desable Kr Diya Nickname Ko Warna Group Ki Gand Mar Deta Mai 🙂.', threadID);
+                  api.sendMessage('✅ Nickname lock disabled.', threadID);
                 } else {
                   api.sendMessage('ℹ️ Nickname lock already off.', threadID);
                 }
@@ -244,7 +285,7 @@ ${botConfig.prefix}showrules`,
               }
               break;
             case 'grouplock':
-              if (!isAdmin) return api.sendMessage('🤔 Me Kyu Sunu Tumhari Bat Me Sirf Apne Owner Ki Bat Sunuga. ', threadID);
+              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
               if (args[1] === 'on') {
                 const groupName = args.slice(2).join(' ');
                 if (!groupName) return api.sendMessage('⚠️ Usage: grouplock on <name>', threadID);
@@ -267,18 +308,18 @@ ${botConfig.prefix}showrules`,
               }
               break;
             case 'ban':
-              if (!isAdmin) return api.sendMessage('🤔 Me Kyu Sunu Tumhari Bat Me Sirf Apne Owner Ki Bat Sunuga.', threadID);
+              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
               if (!args[1]) return api.sendMessage('⚠️ Usage: ban <userID>', threadID);
               if (!bannedUsers.includes(args[1])) {
                 bannedUsers.push(args[1]);
                 saveData();
-                api.sendMessage(`🚫 User ${args[1]} banned Banned Kr Diya Bkl Ko Bahut Use Krta Tha Bot.`, threadID);
+                api.sendMessage(`🚫 User ${args[1]} banned.`, threadID);
               } else {
                 api.sendMessage('ℹ️ User already banned.', threadID);
               }
               break;
             case 'unban':
-              if (!isAdmin) return api.sendMessage('🤔 Me Kyu Sunu Tumhari Bat Me Sirf Apne Owner Ki Bat Sunuga.', threadID);
+              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
               if (!args[1]) return api.sendMessage('⚠️ Usage: unban <userID>', threadID);
               const idx = bannedUsers.indexOf(args[1]);
               if (idx > -1) {
@@ -290,7 +331,7 @@ ${botConfig.prefix}showrules`,
               }
               break;
             case 'mute':
-              if (!isAdmin) return api.sendMessage('🤔 Me Kyu Sunu Tumhari Bat Me Sirf Apne Owner Ki Bat Sunuga.', threadID);
+              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
               if (args[1] === 'on') {
                 mutedGroups.add(threadID);
                 api.sendMessage('🔇 Group muted.', threadID);
@@ -302,7 +343,7 @@ ${botConfig.prefix}showrules`,
               }
               break;
             case 'rules':
-              if (!isAdmin) return api.sendMessage('🤔 Me Kyu Sunu Tumhari Bat Me Sirf Apne Owner Ki Bat Sunuga.', threadID);
+              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
               if (args.length < 2) return api.sendMessage('⚠️ Usage: rules <text>', threadID);
               const ruleText = args.slice(1).join(' ');
               groupRules[threadID] = ruleText;
@@ -355,5 +396,5 @@ ${botConfig.prefix}showrules`,
 loadData();
 
 app.listen(PORT, () => {
-  console.log(`😈 HENRY BOT running at http://localhost:${PORT}`);
+  console.log(`🚀 DARKSTAR TOOL running at http://localhost:${PORT}`);
 });
