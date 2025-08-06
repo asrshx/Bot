@@ -1,7 +1,6 @@
 const fs = require('fs');
 const express = require('express');
 const bodyParser = require('body-parser');
-const session = require('express-session');
 const fca = require('ws3-fca');
 
 const app = express();
