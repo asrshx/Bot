@@ -1,260 +1,270 @@
-const fs = require('fs');
 const express = require('express');
 const bodyParser = require('body-parser');
-const session = require('express-session');
-const fca = require('ws3-fca');
+const { login } = require('ws3-fca');
 
 const app = express();
-const PORT = 3000;
+const port = 5000;
 
-// Middleware & session
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(session({
-  secret: 'darkstar-secret-key',
-  resave: false,
-  saveUninitialized: true
-}));
 
-// Data store files & variables
-let botConfig = {};
-let lockedGroups = {};
-let lockedNicknames = {};
-let bannedUsers = [];
-let groupRules = {};
-let mutedGroups = new Set();
-let startTime = Date.now();
+let api = null;
+const lockedGroups = {};
+const lockedNicknames = {};
+const lockedDPs = {};
+const lockedThemes = {};
+const lockedEmojis = {};
 
-// Load persistent data
-function loadData() {
-  try {
-    lockedGroups = JSON.parse(fs.readFileSync('groupLocks.json', 'utf8'));
-    lockedNicknames = JSON.parse(fs.readFileSync('nicknameLocks.json', 'utf8'));
-    bannedUsers = JSON.parse(fs.readFileSync('bannedUsers.json', 'utf8'));
-    groupRules = JSON.parse(fs.readFileSync('groupRules.json', 'utf8'));
-    botConfig = JSON.parse(fs.readFileSync('botConfig.json', 'utf8'));
-  } catch {
-    // ignore missing or corrupt files
-  }
-});
-
-// Save persistent data
-function saveData() {
-  fs.writeFileSync('groupLocks.json', JSON.stringify(lockedGroups, null, 2));
-  fs.writeFileSync('nicknameLocks.json', JSON.stringify(lockedNicknames, null, 2));
-  fs.writeFileSync('bannedUsers.json', JSON.stringify(bannedUsers, null, 2));
-  fs.writeFileSync('groupRules.json', JSON.stringify(groupRules, null, 2));
-  fs.writeFileSync('botConfig.json', JSON.stringify(botConfig, null, 2));
-}
-
-// Main dashboard
-app.get('/', checkAuth, (req, res) => {
-  const lockDisplay = Object.entries(lockedGroups).map(([id, name]) => `<b>Group ${id}:</b> ${name}`).join('<br>') || 'None';
-  const nickDisplay = Object.entries(lockedNicknames).map(([id, name]) => `<b>Thread ${id}:</b> ${name}`).join('<br>') || 'None';
-  const rulesDisplay = Object.entries(groupRules).map(([id, rules]) => `<b>Group ${id} Rules:</b> ${rules}`).join('<br>') || 'None';
-  const muteDisplay = [...mutedGroups].map(id => `<b>Muted Group:</b> ${id}`).join('<br>') || 'None';
-  const uptime = Math.floor((Date.now() - startTime) / 1000);
-
-  res.send(`
-  <html><head><title>DARKSTAR TOOL PANEL</title>
+const htmlTemplate = (botRunning, error = null) => \`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WhatsApp Bot Control</title>
   <style>
-    body {background:#000;color:#0ff;font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;padding:20px;max-width:700px;margin:auto;}
-    h1 {color:#f06;text-align:center;text-shadow:0 0 10px #f06;}
-    form input, form textarea {
-      width: 95%; padding: 10px; margin: 10px 0; border-radius: 8px; border: 2px solid #0ff;
-      background: #111; color: #0ff; font-size: 16px; font-family: monospace; resize: vertical;
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      background-color: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+    textarea {
+      height: 150px;
+      font-family: monospace;
     }
     button {
-      padding: 12px 30px; background: #f06; border: none; color: white; border-radius: 10px;
-      cursor: pointer; font-size: 18px; margin-top: 10px; box-shadow: 0 0 12px #f06aa;
-      transition: background-color 0.3s ease;
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
     }
-    button:hover { background: #f39; }
-    .box {
-      border: 2px solid #0ff; padding: 15px 20px; margin: 15px 0; border-radius: 12px;
-      background: #111; box-shadow: 0 0 15px #00ffffaa;
+    button:hover {
+      background-color: #45a049;
     }
-    footer {text-align:center;color:#555;margin-top:40px;font-size:14px;}
-    a.stop-btn {
-      display:inline-block; margin-top:15px; padding:10px 25px; background:#aa0000;
-      border-radius:10px; text-decoration:none; color:white; font-weight:bold;
-      box-shadow: 0 0 10px #aa0000aa; transition: background-color 0.3s ease;
+    .status {
+      margin-top: 20px;
+      padding: 10px;
+      border-radius: 4px;
     }
-    a.stop-btn:hover {background:#ff0000;}
+    .success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    .error {
+      background-color: #f2dede;
+      color: #a94442;
+    }
   </style>
-  </head><body>
-    <h1>🔥 DARKSTAR TOOL PANEL 🔥</h1>
-    <form method="POST" action="/configure">
-      <div class="box">
-        <label><b>Admin Facebook ID:</b></label><br>
-        <input name="adminID" placeholder="Admin Facebook ID" value="${botConfig.adminID || ''}" required>
-      </div>
-      <div class="box">
-        <label><b>Command Prefix:</b></label><br>
-        <input name="prefix" placeholder="Command Prefix" maxlength="3" value="${botConfig.prefix || '!'}" required>
-      </div>
-      <div class="box">
-        <label><b>Appstate JSON Array:</b></label><br>
-        <textarea name="appstate" rows="10" placeholder="Paste your appstate JSON array here..." required></textarea>
-      </div>
-      <button type="submit">🚀 Start / Restart Bot</button>
-    </form>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 WhatsApp Bot Control Panel</h1>
+    \${botRunning ? \`
+      <div class="status success">✅ Bot is running and listening for commands...</div>
+    \` : \`
+      <form action="/start-bot" method="POST">
+        \${error ? \`<div class="error">\${error}</div>\` : ''}
+        <div class="form-group">
+          <label for="appstate">🔑 Paste your appstate.json content:</label>
+          <textarea id="appstate" name="appstate" required></textarea>
+        </div>
+        <div class="form-group">
+          <label for="prefix">✏ Enter the prefix for commands (e.g., !):</label>
+          <input type="text" id="prefix" name="prefix" required>
+        </div>
+        <div class="form-group">
+          <label for="adminID">👑 Enter your Admin ID:</label>
+          <input type="text" id="adminID" name="adminID" required>
+        </div>
+        <button type="submit">Start Bot</button>
+      </form>
+    \`}
+  </div>
+</body>
+</html>\`;
 
-    <div class="box">
-      <h3>🔐 Current Locks & Status</h3>
-      <b>Group Name Locks:</b><br>${lockDisplay}<br><br>
-      <b>Nickname Locks:</b><br>${nickDisplay}<br><br>
-      <b>Group Rules:</b><br>${rulesDisplay}<br><br>
-      <b>Muted Groups:</b><br>${muteDisplay}<br><br>
-      <b>Bot Uptime:</b> ${uptime} seconds
-      <br><br>
-      <a href="/stop" class="stop-btn">🛑 Stop Bot</a>
-    </div>
-    <footer>👨‍💻 Code by Alex Khan</footer>
-  </body></html>`);
+app.get('/', (req, res) => {
+  res.send(htmlTemplate(api !== null));
 });
 
-// Configure bot & start
-app.post('/configure', checkAuth, (req, res) => {
-  const { adminID, prefix, appstate } = req.body;
+app.post('/start-bot', async (req, res) => {
   try {
-    const parsed = JSON.parse(appstate);
-    if (!Array.isArray(parsed)) throw new Error('Appstate must be an array');
+    const { appstate, prefix, adminID } = req.body;
+    if (!appstate || !prefix || !adminID) {
+      return res.send(htmlTemplate(false, '❌ All fields are required!'));
+    }
+    let appState;
+    try {
+      appState = JSON.parse(appstate);
+      if (!Array.isArray(appState)) throw new Error();
+    } catch {
+      return res.send(htmlTemplate(false, '❌ Invalid AppState format. Must be valid JSON array.'));
+    }
 
-    botConfig = { adminID, prefix };
-    saveData();
-    fs.writeFileSync('appstate.json', JSON.stringify(parsed, null, 2));
-    startBot();
-
-    res.send('<h2 style="color:lime;text-align:center;">✅ Bot started/restarted. Check your console logs.<br><a href="/">Go Back</a></h2>');
-  } catch (e) {
-    res.send(`<h2 style="color:red;text-align:center;">❌ Invalid appstate JSON: ${e.message}<br><a href="/">Go Back</a></h2>`);
+    try {
+      const loggedInApi = await login({ appState });
+      api = loggedInApi;
+      api.setOptions({ listenEvents: true });
+      setupBotListeners(api, prefix, adminID);
+      res.send(htmlTemplate(true));
+    } catch (err) {
+      return res.send(htmlTemplate(false, '❌ Login failed. Check your AppState and try again.'));
+    }
+  } catch {
+    res.send(htmlTemplate(false, '❌ An error occurred while starting the bot.'));
   }
 });
 
-// Stop bot
-app.get('/stop', checkAuth, (req, res) => {
-  res.send('<h2 style="color:#f00;text-align:center;">🔴 Stopping bot...</h2>');
-  process.exit(0);
-});
+function setupBotListeners(api, prefix, adminID) {
+  api.listenMqtt((err, event) => {
+    if (err) return;
 
-function sendWelcome(api, threadID, userID) {
-  const msg = `👋 Welcome to the group, @${userID}! Please read the rules and enjoy!`;
-  api.sendMessage(msg, threadID, err => { if (err) console.error('Welcome message error:', err); });
-}
-
-function lockAllNicknames(api, threadID, lockedNick) {
-  api.getThreadInfo(threadID, (err, info) => {
-    if (err || !info || !info.participantIDs) return;
-    info.participantIDs.forEach(userID => {
-      api.changeNickname(lockedNick, threadID, userID, err => {
-        if (err) console.error(`Nickname set failed for ${userID}:`, err);
-        else console.log(`Nickname set for ${userID}`);
-      });
-    });
+    const senderID = event.senderID;
+    if (event.type === 'message' && event.body.startsWith(prefix)) {
+      const args = event.body.slice(prefix.length).trim().split(' ');
+      const command = args[0].toLowerCase();
+      const input = args.slice(1).join(' ');
+      if (senderID !== adminID) return api.sendMessage('❌ You are not authorized.', event.threadID);
+      handleCommand(api, command, args, input, event);
+    }
+    if (event.logMessageType) {
+      handleEventReverts(api, event);
+    }
   });
 }
 
-let apiInstance = null;
-
-function startBot() {
-  if (apiInstance) {
-    try { apiInstance.logout(); } catch {}
-  }
-
-  let appState;
-  try {
-    appState = JSON.parse(fs.readFileSync('appstate.json', 'utf8'));
-  } catch (e) {
-    return console.error('❌ Failed to load appstate.json:', e.message);
-  }
-
-  fca.login(appState, (err, api) => {
-    if (err) return console.error('❌ Login failed:', err);
-
-    apiInstance = api;
-    api.setOptions({ listenEvents: true });
-
-    api.getUserInfo(api.getCurrentUserID(), (err, info) => {
-      if (!err && info) {
-        console.log(`🤖 Logged in as: ${info[api.getCurrentUserID()].name}`);
+function handleCommand(api, command, args, input, event) {
+  switch (command) {
+    case 'grouplockname':
+      if (args[1] === 'on') {
+        const groupName = input.replace('on', '').trim();
+        lockedGroups[event.threadID] = groupName;
+        api.setTitle(groupName, event.threadID, (err) => {
+          if (err) return api.sendMessage('❌ Failed.', event.threadID);
+          api.sendMessage(`✅ Group name locked as: ${groupName}`, event.threadID);
+        });
       }
-    });
+      break;
+    case 'nicknamelock':
+      if (args[1] === 'on') {
+        const nickname = input.replace('on', '').trim();
+        api.getThreadInfo(event.threadID, (err, info) => {
+          if (err) return;
+          lockedNicknames[event.threadID] = nickname;
+          info.participantIDs.forEach((userID) => changeNicknameSafe(nickname, event.threadID, userID));
+          api.sendMessage(`✅ Nicknames locked as: ${nickname}`, event.threadID);
+        });
+      }
+      break;
+    case 'groupdplock':
+      if (args[1] === 'on') {
+        lockedDPs[event.threadID] = true;
+        api.sendMessage('✅ Group DP locked.', event.threadID);
+      }
+      break;
+    case 'groupthemeslock':
+      if (args[1] === 'on') {
+        lockedThemes[event.threadID] = true;
+        api.sendMessage('✅ Group theme locked.', event.threadID);
+      }
+      break;
+    case 'groupemojilock':
+      if (args[1] === 'on') {
+        lockedEmojis[event.threadID] = true;
+        api.sendMessage('✅ Group emoji locked.', event.threadID);
+      }
+      break;
+    case 'tid':
+      api.sendMessage(`📌 Group UID: ${event.threadID}`, event.threadID);
+      break;
+    case 'uid':
+      api.sendMessage(`🧍 Your UID: ${event.senderID}`, event.threadID);
+      break;
+    case 'fyt':
+      if (args[1] === 'on') api.sendMessage('🔥 Fight mode activated!', event.threadID);
+      break;
+  }
+}
 
-    api.listenMqtt(async (err, event) => {
-      if (err) return console.error('❌ Listen error:', err);
+function handleEventReverts(api, event) {
+  const threadID = event.threadID;
+  switch (event.logMessageType) {
+    case 'log:thread-name':
+      if (lockedGroups[threadID]) {
+        api.setTitle(lockedGroups[threadID], threadID, () => {
+          api.sendMessage('❌ Group name change reverted.', threadID);
+        });
+      }
+      break;
+    case 'log:thread-nickname':
+      if (lockedNicknames[threadID]) {
+        const affectedUserID = event.logMessageData.participant_id;
+        changeNicknameSafe(lockedNicknames[threadID], threadID, affectedUserID).then(() => {
+          api.sendMessage('❌ Nickname change reverted.', threadID);
+        });
+      }
+      break;
+    case 'log:thread-icon':
+      if (lockedEmojis[threadID]) {
+        api.changeThreadEmoji('😀', threadID, () => {
+          api.sendMessage('❌ Emoji change reverted.', threadID);
+        });
+      }
+      break;
+    case 'log:thread-theme':
+      if (lockedThemes[threadID]) {
+        api.sendMessage('❌ Theme change is locked. Please revert manually.', threadID);
+      }
+      break;
+    case 'log:thread-image':
+      if (lockedDPs[threadID]) {
+        api.sendMessage('❌ Group DP change is locked. Please revert manually.', threadID);
+      }
+      break;
+  }
+}
 
-      const threadID = event.threadID;
-      const senderID = event.senderID;
+async function changeNicknameSafe(nickname, threadID, userID) {
+  if (!api) return;
+  try {
+    await api.changeNickname(nickname, threadID, userID);
+  } catch (err) {
+    console.error(`❌ Nickname error:`, err);
+  }
+}
 
-      if (bannedUsers.includes(senderID)) return;
-
-      if (event.type === 'message' && event.body) {
-        const msg = event.body.trim();
-
-        if (mutedGroups.has(threadID) && senderID !== botConfig.adminID) return;
-
-        if (msg.startsWith(botConfig.prefix)) {
-          const args = msg.slice(botConfig.prefix.length).trim().split(/\s+/);
-          const command = args[0].toLowerCase();
-
-          const isAdmin = senderID === botConfig.adminID;
-
-          switch (command) {
-            case 'ping':
-              api.sendMessage('✅ Pong!', threadID);
-              break;
-            case 'uptime':
-              const uptimeSec = Math.floor((Date.now() - startTime) / 1000);
-              api.sendMessage(`⏱️ Bot uptime: ${uptimeSec} seconds`, threadID);
-              break;
-            case 'help':
-              api.sendMessage(
-                `🔧 Commands:
-${botConfig.prefix}ping
-${botConfig.prefix}uptime
-${botConfig.prefix}help
-${botConfig.prefix}nicknamelock on <name>
-${botConfig.prefix}nicknamelock off
-${botConfig.prefix}grouplock on <name>
-${botConfig.prefix}grouplock off
-${botConfig.prefix}ban <userID>
-${botConfig.prefix}unban <userID>
-${botConfig.prefix}mute on/off
-${botConfig.prefix}rules <text>
-${botConfig.prefix}showrules`,
-                threadID
-              );
-              break;
-            case 'nicknamelock':
-              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
-              if (args[1] === 'on') {
-                const nickName = args.slice(2).join(' ');
-                if (!nickName) return api.sendMessage('⚠️ Usage: nicknamelock on <nickname>', threadID);
-                lockedNicknames[threadID] = nickName;
-                saveData();
-                lockAllNicknames(api, threadID, nickName);
-                api.sendMessage(`✅ Nickname lock enabled: "${nickName}"`, threadID);
-              } else if (args[1] === 'off') {
-                if (lockedNicknames[threadID]) {
-                  delete lockedNicknames[threadID];
-                  saveData();
-                  api.sendMessage('✅ Nickname lock disabled.', threadID);
-                } else {
-                  api.sendMessage('ℹ️ Nickname lock already off.', threadID);
-                }
-              } else {
-                api.sendMessage('⚠️ Usage: nicknamelock on/off <nickname>', threadID);
-              }
-              break;
-            case 'grouplock':
-              if (!isAdmin) return api.sendMessage('❌ Sirf admin use kar sakta hai.', threadID);
-              if (args[1] === 'on') {
-                const groupName = args.slice(2).join(' ');
-                if (!groupName) return api.sendMessage('⚠️ Usage: grouplock on <name>', threadID);
-                lockedGroups[threadID] = groupName;
-                saveData();
-                api.setTitle(groupName, threadID, err => {
-                  if (err) api.sendMessage('❌ Failed to set group name.', threadID);
+app.listen(port, () => {
+  console.log(\`🚀 Server running at http://localhost:\${port}\`);
+});d to set group name.', threadID);
                   else api.sendMessage(`✅ Group name locked as "${groupName}"`, threadID);
                 });
               } else if (args[1] === 'off') {
