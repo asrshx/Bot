@@ -1,13 +1,14 @@
+
 {
-  "name": "facebook-bot-panel",
+  "name": "messenger-bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "body-parser": "^1.20.2",
     "express": "^4.18.2",
-    "ws3-fca": "1.0.1"
+    "axios": "^1.4.0",
+    "body-parser": "^1.20.2"
   }
 }
